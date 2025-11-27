@@ -7,17 +7,13 @@ python3 dfw-rule-stats.py -s <NSX_IP> -u <USERNAME> -o <OUTPUT_FILE>
 
 Arguments:
 
-  -h, --help            show this help message and exit
-  
+  -h, --help            show this help message and exit\
   -s SERVER, --server SERVER
-                        -> NSX Manager IP/FQDN
-  
+                        -> NSX Manager IP/FQDN\
   -u USERNAME, --username USERNAME
-                        -> NSX Username
-  
+                        -> NSX Username\
   -p PASSWORD, --password PASSWORD
-                        -> NSX Password (optional)
-  
+                        -> NSX Password (optional)\
   -o OUTPUT, --output OUTPUT
                         -> Output CSV filename (e.g. stats.csv)
 
