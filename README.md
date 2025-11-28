@@ -3,7 +3,7 @@ Retrieves rule statistics, formats them into a readable table grouped by Policy,
 
 Command:
 
-python3 dfw-rule-stats.py -s <NSX_IP> -u <USERNAME> -o <OUTPUT_FILE>
+   python3 dfw-rule-stats.py -s <NSX_IP> -u <USERNAME> -o <OUTPUT_FILE>
 
 Arguments:
 
@@ -17,3 +17,8 @@ Arguments:
   -o OUTPUT, --output OUTPUT
                         -> Output CSV filename (e.g. stats.csv)
 
+Sample output:
+
+  <img width="936" height="522" alt="image" src="https://github.com/user-attachments/assets/2b636955-55cf-4715-b811-4f19de108b05" />
+
+  
