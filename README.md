@@ -19,7 +19,8 @@ Arguments:
 
 Sample output:
 
-   <img width="948" height="525" alt="image" src="https://github.com/user-attachments/assets/dd2c3909-24f7-460a-a727-5e74fba28376" />
+   <img width="951" height="633" alt="image" src="https://github.com/user-attachments/assets/1cf84a3b-64d6-41d8-9187-830b12cb271f" />
+
 
 
    
