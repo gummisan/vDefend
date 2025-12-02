@@ -30,18 +30,38 @@ def convert_epoch_to_date(epoch_ms):
         return "Invalid Date"
 
 def get_dfw_sections(nsx_host, session):
-    """Retrieves all Distributed Firewall Security Policies."""
+    """Retrieves all Distributed Firewall Security Policies with AUTH CHECK."""
     policies_api = "/policy/api/v1/infra/domains/default/security-policies"
     url = f"https://{nsx_host}{policies_api}"
     
-    print(f"Fetching Security Policies from {url}...")
+    print(f"Connecting to NSX-T Manager at {nsx_host}...")
+    
     try:
         response = session.get(url, headers=HEADERS, verify=False)
         response.raise_for_status() 
         return response.json().get('results', [])
+
+    # --- SPECIFIC ERROR HANDLING ---
+    except requests.exceptions.HTTPError as err:
+        if response.status_code in [401, 403]:
+            print("\n❌ AUTHENTICATION FAILED!")
+            print("   Please check your Username and Password.")
+            print(f"   Server responded with: {response.status_code} {response.reason}")
+        elif response.status_code == 404:
+            print("\n❌ API ENDPOINT NOT FOUND!")
+            print("   The NSX-T version might be too old or the URL is incorrect.")
+        else:
+            print(f"\n❌ HTTP Error: {err}")
+        return None
+
+    except requests.exceptions.ConnectionError:
+        print("\n❌ CONNECTION FAILED!")
+        print(f"   Could not reach {nsx_host}. Check the IP address and VPN/Network connection.")
+        return None
+
     except Exception as err:
-        print(f"❌ Error fetching Security Policies: {err}")
-        return []
+        print(f"\n❌ Unexpected Error: {err}")
+        return None
 
 def get_policy_rules(nsx_host, policy_id, session):
     """Retrieves all rules for a given Security Policy ID."""
@@ -93,14 +113,18 @@ def main():
     nsx_session = requests.Session()
     nsx_session.auth = (args.username, nsx_password)
 
-    # 1. Get Policies
+    # 1. Get Policies (With Login Check)
     all_policies = get_dfw_sections(args.server, nsx_session)
 
+    # If None is returned, it means a specific error was printed inside the function
+    if all_policies is None:
+        return # Stop script immediately
+    
     if not all_policies:
-        print("\n❌ Failed to retrieve any Security Policies.")
+        print("⚠️ Login successful, but no Security Policies were found.")
         return
 
-    print(f"\nProcessing {len(all_policies)} Security Policies...")
+    print(f"✅ Login Successful! Processing {len(all_policies)} Security Policies...")
     all_stats_data = []
 
     # 2. Iterate to Collect Data
@@ -165,7 +189,6 @@ def main():
         # Loop through data to print Grouped Output
         current_policy = None
         
-        # Define column widths
         w_rule = 35
         w_id = 10
         w_hit = 15
@@ -178,20 +201,14 @@ def main():
         divider       = "-" * (w_rule + w_id + w_hit + w_bytes + w_time + w_user)
 
         for row in all_stats_data:
-            # Check if we hit a new Policy
             if row['Policy'] != current_policy:
                 current_policy = row['Policy']
-                
-                # Print Policy Header
                 print("\n" + "=" * 80)
                 print(f"📘 POLICY: {current_policy}")
                 print("=" * 80)
-                
-                # Print Table Header for this section
                 print(header_format.format("Rule Name", "Rule ID", "Hit Count", "Bytes (MB)", "Last Modified", "Modified By"))
                 print(divider)
             
-            # Print Rule Row
             print(row_format.format(
                 row['Rule Name'][:w_rule-1], 
                 str(row['Rule ID'])[:w_id-1], 
@@ -201,7 +218,7 @@ def main():
                 row['Modified By'][:w_user-1]
             ))
 
-    # 4. CSV Export (Flat Format)
+    # 4. CSV Export
     if args.output and all_stats_data:
         try:
             with open(args.output, mode='w', newline='', encoding='utf-8') as csv_file:
