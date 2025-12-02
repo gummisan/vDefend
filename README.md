@@ -1,9 +1,9 @@
-# dfw-rule-stats-v1.py
+# dfw-rule-stats-v2.py
 Retrieves rule statistics, formats them into a readable table grouped by Policy, and optionally saves to CSV.
 
 Command:
 
-   python3 dfw-rule-stats-v1.py --server <NSX_IP> --username <USERNAME> --output <OUTPUT_FILE>
+   python3 dfw-rule-stats-v2.py --server <NSX_IP> --username <USERNAME> --output <OUTPUT_FILE>
 
 Arguments:
 
