@@ -41,22 +41,19 @@ def get_dfw_sections(nsx_host, session):
         response.raise_for_status() 
         return response.json().get('results', [])
 
-    # --- SPECIFIC ERROR HANDLING ---
     except requests.exceptions.HTTPError as err:
         if response.status_code in [401, 403]:
             print("\n❌ AUTHENTICATION FAILED!")
             print("   Please check your Username and Password.")
-            print(f"   Server responded with: {response.status_code} {response.reason}")
         elif response.status_code == 404:
             print("\n❌ API ENDPOINT NOT FOUND!")
-            print("   The NSX-T version might be too old or the URL is incorrect.")
         else:
             print(f"\n❌ HTTP Error: {err}")
         return None
 
     except requests.exceptions.ConnectionError:
         print("\n❌ CONNECTION FAILED!")
-        print(f"   Could not reach {nsx_host}. Check the IP address and VPN/Network connection.")
+        print(f"   Could not reach {nsx_host}. Check IP/VPN.")
         return None
 
     except Exception as err:
@@ -98,7 +95,7 @@ def get_rule_statistics(nsx_host, policy_id, rule_id, session):
 # --- Main Logic ---
 
 def main():
-    parser = argparse.ArgumentParser(description="Retrieve NSX-T DFW Rule Statistics (Grouped).")
+    parser = argparse.ArgumentParser(description="Retrieve NSX-T DFW Rule Statistics (Grouped + Creation Time).")
     parser.add_argument('-s', '--server', required=True, help='NSX-T Manager IP/FQDN')
     parser.add_argument('-u', '--username', required=True, help='NSX-T Username')
     parser.add_argument('-p', '--password', required=False, help='NSX-T Password (optional)')
@@ -113,13 +110,10 @@ def main():
     nsx_session = requests.Session()
     nsx_session.auth = (args.username, nsx_password)
 
-    # 1. Get Policies (With Login Check)
+    # 1. Get Policies
     all_policies = get_dfw_sections(args.server, nsx_session)
 
-    # If None is returned, it means a specific error was printed inside the function
-    if all_policies is None:
-        return # Stop script immediately
-    
+    if all_policies is None: return 
     if not all_policies:
         print("⚠️ Login successful, but no Security Policies were found.")
         return
@@ -133,7 +127,6 @@ def main():
         policy_display_name = policy.get('display_name', 'N/A')
         section_type = policy.get('section_type', 'N/A')
 
-        # Skip Layer 2 Policies
         if 'LAYER2' in section_type:
             continue
 
@@ -149,10 +142,14 @@ def main():
                 rule_uuid = rule.get('id')
                 rule_display_name = rule.get('display_name', 'N/A')
                 
-                # Audit Info
+                # --- NEW: Extract Creation Time ---
+                raw_create_time = rule.get('_create_time')
+                readable_create_time = convert_epoch_to_date(raw_create_time)
+                
+                # Extract Modification Time
                 raw_mod_time = rule.get('_last_modified_time')
                 last_user = rule.get('_last_modified_user', 'N/A')
-                readable_time = convert_epoch_to_date(raw_mod_time)
+                readable_mod_time = convert_epoch_to_date(raw_mod_time)
 
                 # Stats
                 rule_stats = get_rule_statistics(args.server, policy_id, rule_uuid, nsx_session)
@@ -174,31 +171,26 @@ def main():
                         "Packet Count": packet_count,
                         "Session Count": session_count,
                         "Bytes (MB)": mb_count,
-                        "Last Modified": readable_time,
+                        "Created On": readable_create_time,   # <--- New Field
+                        "Last Modified": readable_mod_time,
                         "Modified By": last_user
                     })
 
             except Exception:
                 continue
 
-    # 3. Output Results to Console (Grouped by Policy)
+    # 3. Output Results to Console
     print("\n")
     if not all_stats_data:
         print("⚠️ No statistics data collected.")
     else:
-        # Loop through data to print Grouped Output
         current_policy = None
         
-        w_rule = 35
-        w_id = 10
-        w_hit = 15
-        w_bytes = 12
-        w_time = 22
-        w_user = 15
-        
-        header_format = f"{{:<{w_rule}}} {{:<{w_id}}} {{:<{w_hit}}} {{:<{w_bytes}}} {{:<{w_time}}} {{:<{w_user}}}"
-        row_format    = f"{{:<{w_rule}}} {{:<{w_id}}} {{:<{w_hit}}} {{:<{w_bytes}}} {{:<{w_time}}} {{:<{w_user}}}"
-        divider       = "-" * (w_rule + w_id + w_hit + w_bytes + w_time + w_user)
+        # Adjusted formatting to fit the new column
+        # R = Rule Name, I = ID, H = Hits, B = Bytes, C = Created, M = Modified, U = User
+        header_fmt = "{:<30} {:<10} {:<15} {:<12} {:<20} {:<20} {:<15}"
+        row_fmt    = "{:<30} {:<10} {:<15} {:<12} {:<20} {:<20} {:<15}"
+        divider    = "-" * 122
 
         for row in all_stats_data:
             if row['Policy'] != current_policy:
@@ -206,23 +198,28 @@ def main():
                 print("\n" + "=" * 80)
                 print(f"📘 POLICY: {current_policy}")
                 print("=" * 80)
-                print(header_format.format("Rule Name", "Rule ID", "Hit Count", "Bytes (MB)", "Last Modified", "Modified By"))
+                print(header_fmt.format("Rule Name", "Rule ID", "Hit Count", "Bytes (MB)", "Created On", "Last Modified", "Modified By"))
                 print(divider)
             
-            print(row_format.format(
-                row['Rule Name'][:w_rule-1], 
-                str(row['Rule ID'])[:w_id-1], 
+            # Truncate modified by user to fit column
+            mod_by_short = row['Modified By'][:14]
+            
+            print(row_fmt.format(
+                row['Rule Name'][:29], 
+                str(row['Rule ID'])[:9], 
                 f"{row['Hit Count']:,}", 
                 f"{row['Bytes (MB)']:,}", 
+                row['Created On'],       # <--- New Column
                 row['Last Modified'], 
-                row['Modified By'][:w_user-1]
+                mod_by_short
             ))
 
     # 4. CSV Export
     if args.output and all_stats_data:
         try:
             with open(args.output, mode='w', newline='', encoding='utf-8') as csv_file:
-                fieldnames = ["Policy", "Rule Name", "Rule ID", "Hit Count", "Packet Count", "Session Count", "Bytes (MB)", "Last Modified", "Modified By"]
+                # Added "Created On" to CSV headers
+                fieldnames = ["Policy", "Rule Name", "Rule ID", "Hit Count", "Packet Count", "Session Count", "Bytes (MB)", "Created On", "Last Modified", "Modified By"]
                 writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
 
                 writer.writeheader()
