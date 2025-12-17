@@ -1,4 +1,4 @@
-# dfw-rule-stats-v3.py
+# 1. dfw-rule-stats-v3.py
 Retrieves rule statistics, formats them into a readable table grouped by Policy, and optionally saves to CSV.
 
 Command:
@@ -95,6 +95,29 @@ If the jump server does not have access to Internet, follow the steps below.
    ```
    (venv1) root@docker-02:~/pythonmodules# python3 dfw-rule-stats-v3.py --server 10.1.1.20 --username admin --output dfwstats.csv
    ```
+
+# 2. dfw-rule-list-v1.py
+Retrieves DFW rules from NSX Manager, formats them into a readable table grouped by Policy, and optionally saves to CSV.
+
+Command: 
+
+   python3 dfw-rule-list-v1.py --server <NSX_IP> --username <USERNAME> --output <OUTPUT_FILE>
+
+Arguments:
+
+  -h, --help            show this help message and exit\
+  -s SERVER, --server SERVER
+                        -> NSX Manager IP/FQDN\
+  -u USERNAME, --username USERNAME
+                        -> NSX Username\
+  -p PASSWORD, --password PASSWORD
+                        -> NSX Password (optional)\
+  -o OUTPUT, --output OUTPUT
+                        -> Output CSV filename (e.g. stats.csv)
+
+Sample Output:
+
+<img width="1170" height="678" alt="image" src="https://github.com/user-attachments/assets/cc7766a1-4d62-4cd9-8103-4e87e4a7205f" />
 
 
    
