@@ -27,21 +27,76 @@ def get_status_visual(disabled_state):
         return "🔴 Disabled"
     return "🟢 Enabled"
 
-def clean_nsx_path(path_list):
+def get_group_ip_map(nsx_host, session):
     """
-    Cleans lists like ["/infra/domains/default/groups/Web"] to "Web"
+    Fetches ALL groups and builds a dictionary:
+    { '/infra/domains/default/groups/MyGroup': '192.168.1.10, 10.0.0.0/24' }
+    Only resolves STATIC IPs. Dynamic logic (Tags/VM names) is skipped for performance.
+    """
+    print("   ... Caching Group Definitions (This may take a moment) ...")
+    api_url = f"https://{nsx_host}/policy/api/v1/infra/domains/default/groups"
+    group_map = {}
+    
+    try:
+        # Loop to handle pagination if > 1000 groups
+        cursor = None
+        while True:
+            params = {'cursor': cursor} if cursor else {}
+            response = session.get(api_url, headers=HEADERS, verify=False, params=params)
+            response.raise_for_status()
+            data = response.json()
+            
+            for group in data.get('results', []):
+                group_path = group.get('path')
+                ip_list = []
+                
+                # Check expressions for IPAddressExpression
+                for expr in group.get('expression', []):
+                    # Check if it's a simple IP Expression
+                    if expr.get('resource_type') == 'IPAddressExpression':
+                        ip_list.extend(expr.get('ip_addresses', []))
+                    
+                    # Also check Conjunctions (OR/AND logic) containing IPs
+                    elif expr.get('resource_type') == 'ConjunctionOperator':
+                         # If nested expressions exist (simplified check)
+                         pass 
+
+                # If we found IPs, store them. Otherwise, leave empty (will default to Name later)
+                if ip_list:
+                    group_map[group_path] = ", ".join(ip_list)
+            
+            cursor = data.get('cursor')
+            if not cursor:
+                break
+                
+        print(f"   ✅ Cached {len(group_map)} Groups with Static IPs.")
+        return group_map
+
+    except Exception as e:
+        print(f"⚠️ Warning: Could not fetch groups. Output will show Group Names only. Error: {e}")
+        return {}
+
+def resolve_nsx_path(path_list, group_map):
+    """
+    1. Checks if the Group Path has mapped IPs in 'group_map'.
+    2. If yes, returns IPs.
+    3. If no, returns the readable Group Name.
     """
     if not path_list:
         return "ANY"
     
-    clean_names = []
+    resolved_items = []
     for item in path_list:
         if item == "ANY":
-            clean_names.append("ANY")
+            resolved_items.append("ANY")
+        elif item in group_map:
+            # FOUND! Use the actual IPs
+            resolved_items.append(f"[{group_map[item]}]")
         else:
-            clean_names.append(item.split('/')[-1])
+            # Not found (Dynamic Group?), just use the Name
+            resolved_items.append(item.split('/')[-1])
             
-    return ", ".join(clean_names)
+    return ", ".join(resolved_items)
 
 def get_dfw_policies(nsx_host, session):
     """Retrieves all Security Policies."""
@@ -67,7 +122,7 @@ def get_policy_rules(nsx_host, policy_id, session):
 # --- Main Logic ---
 
 def main():
-    parser = argparse.ArgumentParser(description="NSX-T Firewall Rule Export")
+    parser = argparse.ArgumentParser(description="NSX-T Firewall Rule Export (With IP Resolution)")
     parser.add_argument('-s', '--server', required=True, help='NSX-T Manager IP')
     parser.add_argument('-u', '--username', required=True, help='NSX-T Username')
     parser.add_argument('-p', '--password', required=False, help='NSX-T Password')
@@ -80,6 +135,11 @@ def main():
     session.auth = (args.username, nsx_password)
 
     print(f"🔄 Connecting to {args.server}...")
+    
+    # STEP 1: Pre-fetch Groups to build IP Map
+    group_ip_map = get_group_ip_map(args.server, session)
+
+    # STEP 2: Fetch Policies
     policies = get_dfw_policies(args.server, session)
     
     if not policies:
@@ -102,22 +162,20 @@ def main():
         export_data.append({"type": "POLICY_HEADER", "name": policy_name, "count": len(rules)})
 
         for rule in rules:
-            # --- Field Mapping based on your JSON ---
             r_name = rule.get('display_name', 'N/A')
-            r_id = rule.get('id', 'N/A') # Matches "default-layer3-rule"
+            r_id = rule.get('id', 'N/A')
             
-            sources = clean_nsx_path(rule.get('source_groups', []))
-            destinations = clean_nsx_path(rule.get('destination_groups', []))
-            services = clean_nsx_path(rule.get('services', []))
+            # --- UPDATED: Pass group_ip_map to resolver ---
+            sources = resolve_nsx_path(rule.get('source_groups', []), group_ip_map)
+            destinations = resolve_nsx_path(rule.get('destination_groups', []), group_ip_map)
             
-            # UPDATED: Changed from 'context_profiles' to 'profiles' based on your JSON
-            profiles = clean_nsx_path(rule.get('profiles', [])) 
+            # Services/Profiles/Scope don't need IP resolution, just name cleaning
+            services = resolve_nsx_path(rule.get('services', []), {}) 
+            profiles = resolve_nsx_path(rule.get('profiles', []), {}) 
+            applied_to = resolve_nsx_path(rule.get('scope', []), {})
             
-            applied_to = clean_nsx_path(rule.get('scope', []))
             action = rule.get('action', 'ALLOW')
-            
-            # Status Logic
-            is_disabled = rule.get('disabled', False) # JSON "disabled": false
+            is_disabled = rule.get('disabled', False)
             status_visual = get_status_visual(is_disabled)
 
             export_data.append({
@@ -137,7 +195,7 @@ def main():
 
     # --- Console Output ---
     print("\n" + "="*145)
-    print(f"{'Name':<30} {'ID':<20} {'Sources':<15} {'Destinations':<15} {'Services':<10} {'Profiles':<10} {'Applied To':<15} {'Action':<8} {'Status':<10}")
+    print(f"{'Name':<25} {'Sources (IPs if Static)':<30} {'Destinations (IPs if Static)':<30} {'Services':<10} {'Action':<8} {'Status':<10}")
     print("="*145)
 
     for item in export_data:
@@ -145,7 +203,11 @@ def main():
             print(f"\n📂 POLICY: {item['name']} ({item['count']} Rules)")
             print("-" * 145)
         else:
-            print(f"{item['Name'][:29]:<30} {item['ID'][:19]:<20} {item['Sources'][:14]:<15} {item['Destinations'][:14]:<15} {item['Services'][:9]:<10} {item['Context Profiles'][:9]:<10} {item['Applied To'][:14]:<15} {item['Action']:<8} {item['Status']:<10}")
+            # Truncate for display cleanliness
+            src_disp = (item['Sources'][:27] + '..') if len(item['Sources']) > 27 else item['Sources']
+            dst_disp = (item['Destinations'][:27] + '..') if len(item['Destinations']) > 27 else item['Destinations']
+            
+            print(f"{item['Name'][:24]:<25} {src_disp:<30} {dst_disp:<30} {item['Services'][:9]:<10} {item['Action']:<8} {item['Status']:<10}")
 
     # --- CSV Export ---
     if args.output:
@@ -156,8 +218,10 @@ def main():
                 for item in export_data:
                     if item["type"] == "RULE":
                         writer.writerow([
-                            item['Policy'], item['Name'], item['ID'], item['Sources'], 
-                            item['Destinations'], item['Services'], item['Context Profiles'], 
+                            item['Policy'], item['Name'], item['ID'], 
+                            item['Sources'],      # Contains IPs now
+                            item['Destinations'], # Contains IPs now
+                            item['Services'], item['Context Profiles'], 
                             item['Applied To'], item['Action'], item['Raw_Status']
                         ])
             print(f"\n✅ Exported to CSV: {args.output}")
