@@ -119,8 +119,28 @@ Sample Output:
 
 <img width="1170" height="678" alt="image" src="https://github.com/user-attachments/assets/cc7766a1-4d62-4cd9-8103-4e87e4a7205f" />
 
+# 3. idps-master-v5.py
+Retrieves IDPS rules from NSX Manager, with option to export them to a CSV and also list IDPS rules for a specific VM.
 
+Command: 
+
+   python3 idps-master-v5.py 
+
+Arguments: (optional)
+
+  -h, --help            show this help message and exit\
+  -s SERVER, --server SERVER
+                        -> NSX Manager IP/FQDN\
+  -u USERNAME, --username USERNAME
+                        -> NSX Username\
+  -p PASSWORD, --password PASSWORD
+                        -> NSX Password (optional)\
+  -o OUTPUT, --output OUTPUT
+                        -> Output CSV filename (e.g. stats.csv)
+
+Sample Output:
    
+<img width="1668" height="1102" alt="image" src="https://github.com/user-attachments/assets/a6727744-d2c6-46cf-892c-469052eb8c4a" />
 
    
 
